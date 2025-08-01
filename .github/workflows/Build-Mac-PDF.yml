@@ -18,13 +18,16 @@ jobs:
       - name: Build .app
         run: pyinstaller -y --windowed --name InvoiceMerge invoice_flatten_merge.py
 
+      - name: Install Ghostscript
+        run: brew install ghostscript
+
       - name: Vendor Ghostscript
         run: |
-          curl -L -o gs.tgz https://ghostscripturl
-          tar -xzf gs.tgz
+          GS_PREFIX=$(brew --prefix ghostscript)
           mkdir -p dist/InvoiceMerge.app/Contents/Resources/ghostscript
-          cp ghostscript*/bin/gs dist/InvoiceMerge.app/Contents/Resources/ghostscript/
-          cp -R ghostscript*/{lib,Resource} dist/InvoiceMerge.app/Contents/Resources/ghostscript/
+          cp "$GS_PREFIX/bin/gs" dist/InvoiceMerge.app/Contents/Resources/ghostscript/
+          cp -R "$GS_PREFIX/lib" "$GS_PREFIX/share/ghostscript" \
+            dist/InvoiceMerge.app/Contents/Resources/ghostscript/
 
       # (Optional) Codesign & notarize steps here
 
