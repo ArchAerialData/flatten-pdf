@@ -1,0 +1,38 @@
+name: macOS build
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+jobs:
+  build-macos:
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+
+      - run: pip install pyinstaller pypdf2
+
+      - name: Build .app
+        run: pyinstaller -y --windowed invoice_flatten_merge.spec
+
+      - name: Vendor Ghostscript
+        run: |
+          curl -L -o gs.tgz https://ghostscripturl
+          tar -xzf gs.tgz
+          mkdir -p dist/InvoiceMerge.app/Contents/Resources/ghostscript
+          cp ghostscript*/bin/gs dist/InvoiceMerge.app/Contents/Resources/ghostscript/
+          cp -R ghostscript*/{lib,Resource} dist/InvoiceMerge.app/Contents/Resources/ghostscript/
+
+      # (Optional) Codesign & notarize steps here
+
+      - name: Zip app
+        run: ditto -c -k --sequesterRsrc --keepParent dist/InvoiceMerge.app InvoiceMerge-mac.zip
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: InvoiceMerge-mac.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
