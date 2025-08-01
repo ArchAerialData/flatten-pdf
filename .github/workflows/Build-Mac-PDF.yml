@@ -3,6 +3,7 @@ name: macOS build
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   build-macos:
@@ -29,16 +30,13 @@ jobs:
           cp -R "$GS_PREFIX/lib" "$GS_PREFIX/share/ghostscript" \
             dist/InvoiceMerge.app/Contents/Resources/ghostscript/
 
-      # (Optional) Codesign & notarize steps here
-
       - name: Create DMG
         run: |
           hdiutil create -volname InvoiceMerge \
             -srcfolder dist/InvoiceMerge.app -ov -format UDZO InvoiceMerge.dmg
 
-      - uses: softprops/action-gh-release@v2
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: "build-${{ github.run_number }}"
-          files: InvoiceMerge.dmg
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: InvoiceMerge-Mac-DMG
+          path: InvoiceMerge.dmg
