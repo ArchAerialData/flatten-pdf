@@ -13,10 +13,10 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
 
-      - run: pip install pyinstaller pypdf2
+      - run: pip install -r requirements.txt pyinstaller
 
       - name: Build .app
-        run: pyinstaller -y --windowed invoice_flatten_merge.spec
+        run: pyinstaller -y --windowed --name InvoiceMerge invoice_flatten_merge.py
 
       - name: Vendor Ghostscript
         run: |
@@ -28,11 +28,13 @@ jobs:
 
       # (Optional) Codesign & notarize steps here
 
-      - name: Zip app
-        run: ditto -c -k --sequesterRsrc --keepParent dist/InvoiceMerge.app InvoiceMerge-mac.zip
+      - name: Create DMG
+        run: |
+          hdiutil create -volname InvoiceMerge \
+            -srcfolder dist/InvoiceMerge.app -ov -format UDZO InvoiceMerge.dmg
 
       - uses: softprops/action-gh-release@v2
         with:
-          files: InvoiceMerge-mac.zip
+          files: InvoiceMerge.dmg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
