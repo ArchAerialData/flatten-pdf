@@ -2,7 +2,7 @@ name: macOS build
 
 on:
   push:
-    tags: ["v*.*.*"]
+    branches: [main]
 
 jobs:
   build-macos:
