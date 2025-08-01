@@ -208,7 +208,6 @@ def process_folder(folder: Path, out_dir: Path) -> Path:
     return final_out
 
 
-
 def pair_cover_invoices(pdfs: List[Path]) -> List[tuple[Path, Path]]:
     """Return (cover, invoice) pairs from *pdfs* based on keywords."""
     def sanitize(name: str) -> str:
@@ -772,7 +771,6 @@ if GUI_AVAILABLE:
             try:
                 total = len(self.selected_dirs)
                 out_dir = Path(self.output_folder.get().strip())
-
                 successful = 0
                 failed = 0
 
