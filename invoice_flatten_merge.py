@@ -185,8 +185,12 @@ def merge_and_flatten(cover: Path, invoice: Path, final_out: Path) -> None:
         temp_flat.unlink()
 
 
-def process_folder(folder: Path, out_name: str) -> None:
-    """Process a folder containing a cover sheet and invoice."""
+def process_folder(folder: Path, out_dir: Path) -> Path:
+    """Process a folder containing a cover sheet and invoice.
+
+    The merged PDF is written to *out_dir* using the folder name.
+    Returns the path of the created PDF.
+    """
     pdfs = list(folder.glob("*.pdf"))
     if len(pdfs) < 2:
         raise RuntimeError(f"{folder}: expected at least two PDFs")
@@ -199,9 +203,9 @@ def process_folder(folder: Path, out_name: str) -> None:
     else:
         raise RuntimeError(f"{folder}: could not determine cover/invoice pair")
 
-    final_out = folder / out_name
+    final_out = out_dir / f"{folder.name}.pdf"
     merge_and_flatten(cover, invoice, final_out)
-
+    return final_out
 
 
 def pair_cover_invoices(pdfs: List[Path]) -> List[tuple[Path, Path]]:
@@ -404,7 +408,7 @@ if GUI_AVAILABLE:
             # Action buttons
             act = ctk.CTkFrame(card, fg_color="transparent")
             act.grid(row=5, column=0, sticky="we", padx=20, pady=(10, 22))
-            act.grid_columnconfigure((0, 2), weight=1)
+            act.grid_columnconfigure((0, 1, 2), weight=1)
 
             self.clear_btn = ctk.CTkButton(
                 act, text="Clear", fg_color="#cc7a00", hover_color="#b36a00", command=self._clear
@@ -419,6 +423,16 @@ if GUI_AVAILABLE:
                 command=self._start,
             )
             self.start_btn.grid(row=0, column=2, sticky="we", padx=(8, 0))
+
+            self.view_btn = ctk.CTkButton(
+                act,
+                text="View Output",
+                fg_color="#0066cc",
+                hover_color="#005bb5",
+                command=self._open_output_folder,
+            )
+            self.view_btn.grid(row=0, column=1, sticky="we", padx=8)
+            self.view_btn.configure(state="disabled")
 
             # Progress & status
             self.prog = ctk.CTkProgressBar(card, height=16)
@@ -574,11 +588,27 @@ if GUI_AVAILABLE:
             if folder:
                 self.output_folder.set(folder)
 
+        def _open_output_folder(self) -> None:
+            folder = self.output_folder.get().strip()
+            if not folder:
+                return
+            path = Path(folder)
+            if not path.exists():
+                messagebox.showerror("Error", "Output folder does not exist")
+                return
+            if os.name == "nt":
+                os.startfile(path)
+            elif sys.platform == "darwin":
+                subprocess.run(["open", path])
+            else:
+                subprocess.run(["xdg-open", path])
+
         def _clear(self) -> None:
             self.selected_files.clear()
             self.selected_dirs.clear()
             self._refresh_list()
             self._log("🗑️ Cleared all items")
+            self.view_btn.configure(state="disabled")
 
         # ──────────────────────────────────────────────
         # Processing
@@ -595,13 +625,18 @@ if GUI_AVAILABLE:
                 )
                 return
 
-            # Validate output name
+            # When processing individual PDFs, require an output name
             out_name = self.output_name.get().strip()
-            if not out_name:
-                messagebox.showerror("Invalid Name", "Please enter an output file name.")
-                return
 
             if self.selected_dirs:
+                out_folder = self.output_folder.get().strip()
+                if not out_folder:
+                    messagebox.showerror("Invalid Folder", "Please select an output folder.")
+                    return
+                if not Path(out_folder).exists():
+                    messagebox.showerror("Invalid Folder", "The selected output folder does not exist.")
+                    return
+
                 # Process per-folder
                 self.processing = True
                 self._update_ui_state(False)
@@ -615,6 +650,10 @@ if GUI_AVAILABLE:
 
                 if not Path(out_folder).exists():
                     messagebox.showerror("Invalid Folder", "The selected output folder does not exist.")
+                    return
+
+                if not out_name:
+                    messagebox.showerror("Invalid Name", "Please enter an output file name.")
                     return
 
                 # Start processing thread
@@ -731,12 +770,7 @@ if GUI_AVAILABLE:
         def _process_dirs_thread(self) -> None:
             try:
                 total = len(self.selected_dirs)
-                out_name = self.output_name.get().strip()
-                if not out_name:
-                    out_name = DEFAULT_OUTPUT
-                if not out_name.endswith(".pdf"):
-                    out_name += ".pdf"
-
+                out_dir = Path(self.output_folder.get().strip())
                 successful = 0
                 failed = 0
 
@@ -745,8 +779,8 @@ if GUI_AVAILABLE:
                     self.q.put(("progress", 0.1 + (i / max(total,1)) * 0.8))
                     self.q.put(("status", f"Processing {i+1}/{total}: {fld.name}"))
                     try:
-                        process_folder(fld, out_name)
-                        self.q.put(("log", f"✅ Created: {(fld / out_name).name} in {fld}"))
+                        out_file = process_folder(fld, out_dir)
+                        self.q.put(("log", f"✅ Created: {out_file.name} → {out_dir}"))
                         successful += 1
                     except Exception as e:
                         self.q.put(("log", f"❌ {fld.name}: {str(e)}"))
@@ -757,6 +791,7 @@ if GUI_AVAILABLE:
                     msg = f"✅ Processed {successful} folder(s)"
                     if failed > 0:
                         msg += f", {failed} failed"
+                    msg += f"\nOutput folder: {out_dir}"
                     self.q.put(("status", msg))
                     self.q.put(("success", msg))
                 else:
@@ -779,6 +814,7 @@ if GUI_AVAILABLE:
                     elif msg_type == "success":
                         self._update_ui_state(True)
                         self.processing = False
+                        self.view_btn.configure(state="normal")
                         messagebox.showinfo("Success", data)
                     elif msg_type == "error":
                         self._update_ui_state(True)
@@ -795,7 +831,7 @@ if GUI_AVAILABLE:
             state = "normal" if enabled else "disabled"
             self.start_btn.configure(state=state)
             self.clear_btn.configure(state=state)
-            for widget in [self.out_entry, self.out_name_entry]:
+            for widget in [self.out_entry, self.out_name_entry, self.view_btn]:
                 widget.configure(state=state)
 
         def _log(self, msg: str) -> None:
@@ -832,8 +868,8 @@ def cli_main() -> None:
         "-o",
         "--output",
         type=Path,
-        default=Path.cwd() / DEFAULT_OUTPUT,
-        help=f"Output PDF path (default: {DEFAULT_OUTPUT})",
+        default=None,
+        help="Output file (for PDFs) or folder (with --dirs)",
     )
 
     args = parser.parse_args()
@@ -850,14 +886,17 @@ def cli_main() -> None:
         sys.exit(1)
 
     if args.dirs:
-        out_name = args.output.name
+        out_dir = args.output if args.output else Path.cwd()
+        if not out_dir.exists():
+            print(f"❌ Output directory does not exist: {out_dir}")
+            sys.exit(1)
         for folder in args.dirs:
             if not folder.is_dir():
                 print(f"⚠️ Not a folder: {folder}")
                 continue
             try:
-                process_folder(folder, out_name)
-                print(f"✅ Created: {folder / out_name}")
+                out_file = process_folder(folder, out_dir)
+                print(f"✅ Created: {out_file}")
             except Exception as e:
                 print(f"❌ {folder}: {e}")
         return
@@ -884,8 +923,9 @@ def cli_main() -> None:
     print(f"📄 Found {len(pairs)} pair(s) to merge")
 
     try:
+        base_output = args.output if args.output else Path.cwd() / DEFAULT_OUTPUT
         for i, (cover, invoice) in enumerate(pairs):
-            out_file = args.output if len(pairs) == 1 else args.output.parent / f"MERGED_{invoice.stem}.pdf"
+            out_file = base_output if len(pairs) == 1 else base_output.parent / f"MERGED_{invoice.stem}.pdf"
             merge_and_flatten(cover, invoice, out_file)
             print(f"✅ Created: {out_file}")
         print("✅ Done!")
