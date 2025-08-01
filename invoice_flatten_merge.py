@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """invoice_flatten_merge.py – GUI Edition – v1.4.2
 
-Drag‑and‑drop tool that flattens a completed WHCRWA 6.0 Vendor Invoice Cover
-Sheet and merges it with its GFT invoice, yielding a single **fully flattened**
-two‑page PDF. Includes both a GUI for casual users and a CLI fallback for power
-users.
+Drag‑and‑drop tool that pairs PDFs containing "Cover Sheet" and "Invoice" in
+their file names. Each cover sheet is flattened and merged with its invoice to
+produce a single **fully flattened** two‑page PDF. Includes both a GUI for
+casual users and a CLI fallback for power users.
 
 v1.4.2 – Fixed syntax errors and duplicated code
 • Fixed import statement syntax errors
@@ -22,6 +22,7 @@ import queue
 from pathlib import Path
 from typing import List, Optional
 import platform
+import re
 
 try:
     import customtkinter as ctk
@@ -43,7 +44,9 @@ LOGO_DIR = ROOT_DIR / "_GUI-Logos"
 PRIMARY_LOGO = LOGO_DIR / "Arch Aerial Logo White.png"
 CIRCLE_LOGO = LOGO_DIR / "AALLC_CircleLogo_2023_V3_White.png"
 
-VENDOR_KEYWORDS: List[str] = ["vendor", "cover", "6.0", "whcrwa"]
+# Keywords to identify PDFs
+COVER_KEYWORD = "cover sheet"
+INVOICE_KEYWORD = "invoice"
 DEFAULT_OUTPUT = "FINAL_MERGED_INVOICE.pdf"
 
 # ────────────────────────────────────────────────────────────
@@ -165,12 +168,33 @@ def merge_pdfs(first: Path, second: Path, out_pdf: Path) -> None:
         raise RuntimeError(f"Error writing output PDF: {str(e)}")
 
 
-def find_vendor(pdfs: List[Path]) -> Optional[Path]:
-    """Return the vendor‑cover PDF from a list of *pdfs*, if any."""
+
+def pair_cover_invoices(pdfs: List[Path]) -> List[tuple[Path, Path]]:
+    """Return (cover, invoice) pairs from *pdfs* based on keywords."""
+    def sanitize(name: str) -> str:
+        base = name.lower()
+        base = base.replace(COVER_KEYWORD, "")
+        base = base.replace(INVOICE_KEYWORD, "")
+        base = re.sub(r"[\s_-]+", "", base)
+        return base
+
+    groups: dict[str, dict[str, Path]] = {}
     for pdf in pdfs:
-        if any(k in pdf.name.lower() for k in VENDOR_KEYWORDS):
-            return pdf
-    return None
+        stem = pdf.stem.lower()
+        key = sanitize(stem)
+        entry = groups.setdefault(key, {})
+        if COVER_KEYWORD in stem:
+            entry["cover"] = pdf
+        if INVOICE_KEYWORD in stem:
+            entry["invoice"] = pdf
+
+    pairs = []
+    for entry in groups.values():
+        cover = entry.get("cover")
+        invoice = entry.get("invoice")
+        if cover and invoice:
+            pairs.append((cover, invoice))
+    return pairs
 
 # ────────────────────────────────────────────────────────────
 # GUI
@@ -256,7 +280,7 @@ if GUI_AVAILABLE:
 
             ctk.CTkLabel(
                 banner,
-                text="Flatten vendor cover + merge → two‑page PDF",
+                text="Merge Cover Sheet + Invoice → two‑page PDF",
                 text_color="gray70",
             ).grid(row=1, column=1, sticky="n")
 
@@ -264,7 +288,8 @@ if GUI_AVAILABLE:
             card = ctk.CTkFrame(outer, corner_radius=10)
             card.pack(fill="both", expand=True, padx=24, pady=(0, 16))
             card.grid_columnconfigure(0, weight=1)
-            card.grid_rowconfigure(4, weight=1)
+            # allow file list to expand while keeping output options visible
+            card.grid_rowconfigure(3, weight=1)
 
             ctk.CTkLabel(
                 card,
@@ -308,22 +333,37 @@ if GUI_AVAILABLE:
             out_frm.grid(row=4, column=0, sticky="we", padx=20, pady=(12, 8))
             out_frm.grid_columnconfigure(1, weight=1)
 
-            ctk.CTkLabel(out_frm, text="Output folder:").grid(
-                row=0, column=0, sticky="w", padx=(14, 8), pady=10
+            ctk.CTkLabel(
+                out_frm,
+                text="Output Options",
+                font=ctk.CTkFont(size=14, weight="bold"),
+            ).grid(row=0, column=0, columnspan=3, sticky="w", padx=14, pady=(8, 0))
+
+            # Folder
+            ctk.CTkLabel(out_frm, text="Folder:").grid(
+                row=1, column=0, sticky="w", padx=(14, 8), pady=(6, 6)
             )
-            self.out_entry = ctk.CTkEntry(out_frm, textvariable=self.output_folder)
-            self.out_entry.grid(row=0, column=1, sticky="we", padx=(0, 8))
+            self.out_entry = ctk.CTkEntry(
+                out_frm,
+                textvariable=self.output_folder,
+                placeholder_text="Select output folder",
+            )
+            self.out_entry.grid(row=1, column=1, sticky="we", padx=(0, 8))
             ctk.CTkButton(out_frm, text="…", width=28, command=self._choose_output_folder).grid(
-                row=0, column=2, padx=(0, 14)
+                row=1, column=2, padx=(0, 14)
             )
 
+            # File name
             ctk.CTkLabel(out_frm, text="File name:").grid(
-                row=1, column=0, sticky="w", padx=(14, 8), pady=(0, 14)
+                row=2, column=0, sticky="w", padx=(14, 8), pady=(0, 12)
             )
-            ctk.CTkEntry(out_frm, textvariable=self.output_name).grid(
-                row=1, column=1, sticky="we", padx=(0, 8), pady=(0, 14)
+            self.out_name_entry = ctk.CTkEntry(
+                out_frm,
+                textvariable=self.output_name,
+                placeholder_text="Merged file name",
             )
-            ctk.CTkLabel(out_frm, text=".pdf").grid(row=1, column=2, padx=(0, 14))
+            self.out_name_entry.grid(row=2, column=1, sticky="we", padx=(0, 8), pady=(0, 12))
+            ctk.CTkLabel(out_frm, text=".pdf").grid(row=2, column=2, padx=(0, 14))
 
             # Action buttons
             act = ctk.CTkFrame(card, fg_color="transparent")
@@ -480,7 +520,7 @@ if GUI_AVAILABLE:
             if len(self.selected_files) < 2:
                 messagebox.showwarning(
                     "Not Enough PDFs",
-                    "Please select at least 2 PDFs:\n• One vendor cover sheet\n• One or more invoices to merge",
+                    "Please select Cover Sheet and Invoice PDFs to merge.",
                 )
                 return
 
@@ -515,29 +555,20 @@ if GUI_AVAILABLE:
                 self.q.put(("status", "🔍 Analyzing PDFs..."))
 
                 pdfs = [Path(f) for f in self.selected_files]
-                vendor = find_vendor(pdfs)
+                pairs = pair_cover_invoices(pdfs)
 
-                if not vendor:
+                if not pairs:
                     self.q.put(
                         (
                             "error",
-                            "No vendor cover sheet found!\n\n"
-                            "Make sure one PDF contains keywords like:\n"
-                            "• vendor\n• cover\n• 6.0\n• whcrwa",
+                            "No valid 'Cover Sheet' + 'Invoice' pairs found!",
                         )
                     )
                     return
 
-                # Find other PDFs
-                others = [p for p in pdfs if p != vendor]
-                if not others:
-                    self.q.put(("error", "No invoice PDFs found to merge with the vendor cover!"))
-                    return
+                self.q.put(("log", f"📄 Found {len(pairs)} PDF pair(s) to merge"))
 
-                self.q.put(("log", f"✅ Found vendor cover: {vendor.name}"))
-                self.q.put(("log", f"📄 Found {len(others)} invoice(s) to merge"))
-
-                # Process each invoice
+                # Process each pair
                 out_folder = Path(self.output_folder.get())
                 out_name = self.output_name.get().strip()
                 if not out_name.endswith(".pdf"):
@@ -546,24 +577,24 @@ if GUI_AVAILABLE:
                 successful = 0
                 failed = 0
 
-                for i, invoice in enumerate(others):
-                    self.q.put(("progress", 0.2 + (i / len(others)) * 0.6))
-                    self.q.put(("status", f"Processing {i+1}/{len(others)}: {invoice.name}"))
+                for i, (cover, invoice) in enumerate(pairs):
+                    self.q.put(("progress", 0.2 + (i / len(pairs)) * 0.6))
+                    self.q.put(("status", f"Processing {i+1}/{len(pairs)}: {invoice.name}"))
 
-                    # Create temp file for flattened vendor
-                    temp_flat = out_folder / f"TEMP_FLAT_{vendor.stem}_{i}.pdf"
+                    # Create temp file for flattened cover
+                    temp_flat = out_folder / f"TEMP_FLAT_{cover.stem}_{i}.pdf"
                     temp_final = None
                     
                     try:
-                        # Flatten vendor cover
-                        self.q.put(("log", f"🔧 Flattening: {vendor.name}"))
-                        gs_flatten(vendor, temp_flat)
+                        # Flatten cover sheet
+                        self.q.put(("log", f"🔧 Flattening: {cover.name}"))
+                        gs_flatten(cover, temp_flat)
 
                         # Determine output name
-                        if len(others) == 1:
+                        if len(pairs) == 1:
                             final_out = out_folder / out_name
                         else:
-                            # Multiple invoices: use invoice name
+                            # Multiple pairs: use invoice name
                             final_out = out_folder / f"MERGED_{invoice.stem}.pdf"
 
                         # Check if output file already exists
@@ -609,14 +640,14 @@ if GUI_AVAILABLE:
                 self.q.put(("progress", 1.0))
                 
                 if successful > 0:
-                    status_msg = f"✅ Processed {successful} invoice(s)"
+                    status_msg = f"✅ Processed {successful} pair(s)"
                     if failed > 0:
                         status_msg += f", {failed} failed"
                     self.q.put(("status", status_msg))
-                    self.q.put(("success", f"Successfully processed {successful} invoice(s).\n\nOutput folder: {out_folder}"))
+                    self.q.put(("success", f"Successfully processed {successful} pair(s).\n\nOutput folder: {out_folder}"))
                 else:
                     self.q.put(("status", "❌ Processing failed"))
-                    self.q.put(("error", "Failed to process any invoices. Check the console for errors."))
+                    self.q.put(("error", "Failed to process any PDF pairs. Check the console for errors."))
 
             except Exception as e:
                 self.q.put(("error", f"Processing failed:\n{str(e)}"))
@@ -651,7 +682,7 @@ if GUI_AVAILABLE:
             state = "normal" if enabled else "disabled"
             self.start_btn.configure(state=state)
             self.clear_btn.configure(state=state)
-            for widget in [self.out_entry, self.output_name]:
+            for widget in [self.out_entry, self.out_name_entry]:
                 widget.configure(state=state)
 
         def _log(self, msg: str) -> None:
@@ -669,13 +700,13 @@ def cli_main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Flatten vendor cover sheet and merge with invoice PDFs"
+        description="Merge 'Cover Sheet' and 'Invoice' PDFs"
     )
     parser.add_argument(
         "pdfs",
         nargs="+",
         type=Path,
-        help="PDF files to process (must include one vendor cover)",
+        help="PDF files to process",
     )
     parser.add_argument(
         "-o",
@@ -709,53 +740,38 @@ def cli_main() -> None:
         print("❌ Need at least 2 valid PDFs!")
         sys.exit(1)
 
-    # Find vendor cover
-    vendor = find_vendor(valid_pdfs)
-    if not vendor:
-        print("❌ No vendor cover sheet found!")
-        print("Make sure one PDF contains: vendor, cover, 6.0, or whcrwa")
+    # Pair PDFs
+    pairs = pair_cover_invoices(valid_pdfs)
+    if not pairs:
+        print("❌ No valid 'Cover Sheet' + 'Invoice' pairs found!")
         sys.exit(1)
 
-    # Find other PDFs
-    others = [p for p in valid_pdfs if p != vendor]
-    if not others:
-        print("❌ No invoice PDFs found!")
-        sys.exit(1)
-
-    print(f"✅ Vendor cover: {vendor.name}")
-    print(f"📄 Invoices: {', '.join(p.name for p in others)}")
+    print(f"📄 Found {len(pairs)} pair(s) to merge")
 
     try:
         # Process
-        temp_flat = args.output.parent / f"TEMP_FLAT_{vendor.stem}.pdf"
-        
-        print(f"🔧 Flattening vendor cover...")
-        gs_flatten(vendor, temp_flat)
+        for i, (cover, invoice) in enumerate(pairs):
+            temp_flat = args.output.parent / f"TEMP_FLAT_{cover.stem}_{i}.pdf"
 
-        if len(others) == 1:
-            print(f"🔗 Merging with {others[0].name}...")
-            merge_pdfs(temp_flat, others[0], args.output)
-            
+            print(f"🔧 Flattening {cover.name}...")
+            gs_flatten(cover, temp_flat)
+
+            if len(pairs) == 1:
+                out_file = args.output
+                print(f"🔗 Merging with {invoice.name}...")
+            else:
+                out_file = args.output.parent / f"MERGED_{invoice.stem}.pdf"
+                print(f"🔗 Merging {cover.name} + {invoice.name} → {out_file.name}")
+            merge_pdfs(temp_flat, invoice, out_file)
+
             # Flatten the final output
             print(f"🔧 Flattening final output...")
-            temp_final = args.output.parent / f"TEMP_FINAL_{args.output.stem}.pdf"
-            gs_flatten(args.output, temp_final)
-            args.output.unlink()
-            temp_final.rename(args.output)
-            
-            print(f"✅ Created: {args.output}")
-        else:
-            # Multiple invoices: process each
-            for invoice in others:
-                out = args.output.parent / f"MERGED_{invoice.stem}.pdf"
-                print(f"🔗 Merging with {invoice.name} → {out.name}")
-                merge_pdfs(temp_flat, invoice, out)
-                
-                # Flatten each output
-                temp_final = out.parent / f"TEMP_FINAL_{out.stem}.pdf"
-                gs_flatten(out, temp_final)
-                out.unlink()
-                temp_final.rename(out)
+            temp_final = out_file.parent / f"TEMP_FINAL_{out_file.stem}.pdf"
+            gs_flatten(out_file, temp_final)
+            out_file.unlink()
+            temp_final.rename(out_file)
+
+            print(f"✅ Created: {out_file}")
 
         # Cleanup
         if temp_flat.exists():
