@@ -264,7 +264,8 @@ if GUI_AVAILABLE:
             card = ctk.CTkFrame(outer, corner_radius=10)
             card.pack(fill="both", expand=True, padx=24, pady=(0, 16))
             card.grid_columnconfigure(0, weight=1)
-            card.grid_rowconfigure(4, weight=1)
+            # allow file list to expand while keeping output options visible
+            card.grid_rowconfigure(3, weight=1)
 
             ctk.CTkLabel(
                 card,
@@ -308,22 +309,37 @@ if GUI_AVAILABLE:
             out_frm.grid(row=4, column=0, sticky="we", padx=20, pady=(12, 8))
             out_frm.grid_columnconfigure(1, weight=1)
 
-            ctk.CTkLabel(out_frm, text="Output folder:").grid(
-                row=0, column=0, sticky="w", padx=(14, 8), pady=10
+            ctk.CTkLabel(
+                out_frm,
+                text="Output Options",
+                font=ctk.CTkFont(size=14, weight="bold"),
+            ).grid(row=0, column=0, columnspan=3, sticky="w", padx=14, pady=(8, 0))
+
+            # Folder
+            ctk.CTkLabel(out_frm, text="Folder:").grid(
+                row=1, column=0, sticky="w", padx=(14, 8), pady=(6, 6)
             )
-            self.out_entry = ctk.CTkEntry(out_frm, textvariable=self.output_folder)
-            self.out_entry.grid(row=0, column=1, sticky="we", padx=(0, 8))
+            self.out_entry = ctk.CTkEntry(
+                out_frm,
+                textvariable=self.output_folder,
+                placeholder_text="Select output folder",
+            )
+            self.out_entry.grid(row=1, column=1, sticky="we", padx=(0, 8))
             ctk.CTkButton(out_frm, text="…", width=28, command=self._choose_output_folder).grid(
-                row=0, column=2, padx=(0, 14)
+                row=1, column=2, padx=(0, 14)
             )
 
+            # File name
             ctk.CTkLabel(out_frm, text="File name:").grid(
-                row=1, column=0, sticky="w", padx=(14, 8), pady=(0, 14)
+                row=2, column=0, sticky="w", padx=(14, 8), pady=(0, 12)
             )
-            ctk.CTkEntry(out_frm, textvariable=self.output_name).grid(
-                row=1, column=1, sticky="we", padx=(0, 8), pady=(0, 14)
+            self.out_name_entry = ctk.CTkEntry(
+                out_frm,
+                textvariable=self.output_name,
+                placeholder_text="Merged file name",
             )
-            ctk.CTkLabel(out_frm, text=".pdf").grid(row=1, column=2, padx=(0, 14))
+            self.out_name_entry.grid(row=2, column=1, sticky="we", padx=(0, 8), pady=(0, 12))
+            ctk.CTkLabel(out_frm, text=".pdf").grid(row=2, column=2, padx=(0, 14))
 
             # Action buttons
             act = ctk.CTkFrame(card, fg_color="transparent")
@@ -651,7 +667,7 @@ if GUI_AVAILABLE:
             state = "normal" if enabled else "disabled"
             self.start_btn.configure(state=state)
             self.clear_btn.configure(state=state)
-            for widget in [self.out_entry, self.output_name]:
+            for widget in [self.out_entry, self.out_name_entry]:
                 widget.configure(state=state)
 
         def _log(self, msg: str) -> None:
