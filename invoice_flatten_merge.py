@@ -168,6 +168,41 @@ def merge_pdfs(first: Path, second: Path, out_pdf: Path) -> None:
         raise RuntimeError(f"Error writing output PDF: {str(e)}")
 
 
+def merge_and_flatten(cover: Path, invoice: Path, final_out: Path) -> None:
+    """Flatten *cover*, merge with *invoice*, flatten result to *final_out*."""
+    temp_flat = final_out.parent / f"TEMP_FLAT_{cover.stem}.pdf"
+    temp_final = final_out.parent / f"TEMP_FINAL_{final_out.stem}.pdf"
+
+    gs_flatten(cover, temp_flat)
+    merge_pdfs(temp_flat, invoice, final_out)
+    gs_flatten(final_out, temp_final)
+
+    if final_out.exists():
+        final_out.unlink()
+    temp_final.rename(final_out)
+
+    if temp_flat.exists():
+        temp_flat.unlink()
+
+
+def process_folder(folder: Path, out_name: str) -> None:
+    """Process a folder containing a cover sheet and invoice."""
+    pdfs = list(folder.glob("*.pdf"))
+    if len(pdfs) < 2:
+        raise RuntimeError(f"{folder}: expected at least two PDFs")
+
+    pairs = pair_cover_invoices(pdfs)
+    if pairs:
+        cover, invoice = pairs[0]
+    elif len(pdfs) == 2:
+        cover, invoice = pdfs
+    else:
+        raise RuntimeError(f"{folder}: could not determine cover/invoice pair")
+
+    final_out = folder / out_name
+    merge_and_flatten(cover, invoice, final_out)
+
+
 
 def pair_cover_invoices(pdfs: List[Path]) -> List[tuple[Path, Path]]:
     """Return (cover, invoice) pairs from *pdfs* based on keywords."""
@@ -230,7 +265,8 @@ if GUI_AVAILABLE:
                     pass
 
             # State variables
-            self.selected_files: List[str] = []
+            self.selected_files: List[str] = []  # individual PDF files
+            self.selected_dirs: List[str] = []   # folders containing PDF pairs
             self.q: queue.Queue[tuple[str, object]] = queue.Queue()
             self.processing = False
             self.output_folder = ctk.StringVar(value="")
@@ -415,17 +451,13 @@ if GUI_AVAILABLE:
         def _add_items(self, paths: List[str]) -> None:
             added = 0
             invalid = 0
-            
+
             for p in paths:
                 pp = Path(p)
                 if pp.is_dir():
-                    for pdf in pp.glob("*.pdf"):
-                        if str(pdf) not in self.selected_files:
-                            if is_valid_pdf(pdf):
-                                self.selected_files.append(str(pdf))
-                                added += 1
-                            else:
-                                invalid += 1
+                    if str(pp) not in self.selected_dirs:
+                        self.selected_dirs.append(str(pp))
+                        added += 1
                 elif pp.suffix.lower() == ".pdf" and str(pp) not in self.selected_files:
                     if is_valid_pdf(pp):
                         self.selected_files.append(str(pp))
@@ -435,7 +467,7 @@ if GUI_AVAILABLE:
 
             if added > 0:
                 self._refresh_list()
-                self._log(f"➕ Added {added} PDF(s)")
+                self._log(f"➕ Added {added} item(s)")
             
             if invalid > 0:
                 self._log(f"⚠️ Skipped {invalid} invalid PDF(s)")
@@ -444,11 +476,43 @@ if GUI_AVAILABLE:
             for w in self.list_frame.winfo_children():
                 w.destroy()
 
-            if not self.selected_files:
+            if not self.selected_files and not self.selected_dirs:
                 ctk.CTkLabel(
-                    self.list_frame, text="No PDFs selected", text_color="gray70"
+                    self.list_frame,
+                    text="No PDFs or folders selected",
+                    text_color="gray70",
                 ).pack(pady=20)
                 return
+
+            for idx, d in enumerate(self.selected_dirs):
+                row = ctk.CTkFrame(self.list_frame, fg_color="transparent")
+                row.pack(fill="x", pady=2, padx=2)
+
+                ctk.CTkLabel(
+                    row,
+                    text=f"📁 {Path(d).name}",
+                    font=ctk.CTkFont(size=12, weight="bold"),
+                    anchor="w",
+                ).pack(side="left", padx=(6, 4))
+
+                trunc = d if len(d) <= 90 else f"…{d[-87:]}"
+                ctk.CTkLabel(
+                    row,
+                    text=trunc,
+                    text_color="gray70",
+                    font=ctk.CTkFont(size=10),
+                    anchor="w",
+                ).pack(side="left", fill="x", expand=True)
+
+                ctk.CTkButton(
+                    row,
+                    text="×",
+                    width=28,
+                    height=28,
+                    fg_color="#cc2020",
+                    hover_color="#a51616",
+                    command=lambda i=idx: self._remove_dir(i),
+                ).pack(side="right", padx=4)
 
             for idx, fp in enumerate(self.selected_files):
                 row = ctk.CTkFrame(self.list_frame, fg_color="transparent")
@@ -486,6 +550,12 @@ if GUI_AVAILABLE:
                 self._refresh_list()
                 self._log(f"➖ Removed: {Path(removed).name}")
 
+        def _remove_dir(self, idx: int) -> None:
+            if 0 <= idx < len(self.selected_dirs):
+                removed = self.selected_dirs.pop(idx)
+                self._refresh_list()
+                self._log(f"➖ Removed folder: {Path(removed).name}")
+
         def _browse_files(self) -> None:
             files = filedialog.askopenfilenames(
                 title="Select PDF files",
@@ -506,8 +576,9 @@ if GUI_AVAILABLE:
 
         def _clear(self) -> None:
             self.selected_files.clear()
+            self.selected_dirs.clear()
             self._refresh_list()
-            self._log("🗑️ Cleared all files")
+            self._log("🗑️ Cleared all items")
 
         # ──────────────────────────────────────────────
         # Processing
@@ -517,10 +588,10 @@ if GUI_AVAILABLE:
             if self.processing:
                 return
 
-            if len(self.selected_files) < 2:
+            if not self.selected_dirs and len(self.selected_files) < 2:
                 messagebox.showwarning(
                     "Not Enough PDFs",
-                    "Please select Cover Sheet and Invoice PDFs to merge.",
+                    "Please select folders or at least two PDFs to merge.",
                 )
                 return
 
@@ -530,21 +601,26 @@ if GUI_AVAILABLE:
                 messagebox.showerror("Invalid Name", "Please enter an output file name.")
                 return
 
-            # Determine output location
-            out_folder = self.output_folder.get().strip()
-            if not out_folder:
-                out_folder = str(Path(self.selected_files[0]).parent)
-                self.output_folder.set(out_folder)
+            if self.selected_dirs:
+                # Process per-folder
+                self.processing = True
+                self._update_ui_state(False)
+                threading.Thread(target=self._process_dirs_thread, daemon=True).start()
+            else:
+                # Determine output location
+                out_folder = self.output_folder.get().strip()
+                if not out_folder:
+                    out_folder = str(Path(self.selected_files[0]).parent)
+                    self.output_folder.set(out_folder)
 
-            # Check if output folder exists
-            if not Path(out_folder).exists():
-                messagebox.showerror("Invalid Folder", "The selected output folder does not exist.")
-                return
+                if not Path(out_folder).exists():
+                    messagebox.showerror("Invalid Folder", "The selected output folder does not exist.")
+                    return
 
-            # Start processing thread
-            self.processing = True
-            self._update_ui_state(False)
-            threading.Thread(target=self._process_thread, daemon=True).start()
+                # Start processing thread
+                self.processing = True
+                self._update_ui_state(False)
+                threading.Thread(target=self._process_thread, daemon=True).start()
 
             # Start UI update loop
             self.after(50, self._check_queue)
@@ -652,6 +728,43 @@ if GUI_AVAILABLE:
             except Exception as e:
                 self.q.put(("error", f"Processing failed:\n{str(e)}"))
 
+        def _process_dirs_thread(self) -> None:
+            try:
+                total = len(self.selected_dirs)
+                out_name = self.output_name.get().strip()
+                if not out_name:
+                    out_name = DEFAULT_OUTPUT
+                if not out_name.endswith(".pdf"):
+                    out_name += ".pdf"
+
+                successful = 0
+                failed = 0
+
+                for i, folder in enumerate(self.selected_dirs):
+                    fld = Path(folder)
+                    self.q.put(("progress", 0.1 + (i / max(total,1)) * 0.8))
+                    self.q.put(("status", f"Processing {i+1}/{total}: {fld.name}"))
+                    try:
+                        process_folder(fld, out_name)
+                        self.q.put(("log", f"✅ Created: {(fld / out_name).name} in {fld}"))
+                        successful += 1
+                    except Exception as e:
+                        self.q.put(("log", f"❌ {fld.name}: {str(e)}"))
+                        failed += 1
+
+                self.q.put(("progress", 1.0))
+                if successful > 0:
+                    msg = f"✅ Processed {successful} folder(s)"
+                    if failed > 0:
+                        msg += f", {failed} failed"
+                    self.q.put(("status", msg))
+                    self.q.put(("success", msg))
+                else:
+                    self.q.put(("status", "❌ Processing failed"))
+                    self.q.put(("error", "Failed to process any folders."))
+            except Exception as e:
+                self.q.put(("error", f"Processing failed:\n{str(e)}"))
+
         def _check_queue(self) -> None:
             try:
                 while True:
@@ -704,9 +817,16 @@ def cli_main() -> None:
     )
     parser.add_argument(
         "pdfs",
-        nargs="+",
+        nargs="*",
         type=Path,
         help="PDF files to process",
+    )
+    parser.add_argument(
+        "-d",
+        "--dirs",
+        nargs="*",
+        type=Path,
+        help="Folders containing PDF pairs",
     )
     parser.add_argument(
         "-o",
@@ -718,6 +838,9 @@ def cli_main() -> None:
 
     args = parser.parse_args()
 
+    if not args.pdfs and not args.dirs:
+        parser.error("Provide PDF files or folders with --dirs")
+
     # Check Ghostscript
     if not check_ghostscript():
         print("❌ Ghostscript not found! Please install Ghostscript:")
@@ -725,6 +848,19 @@ def cli_main() -> None:
         print("• Mac: brew install ghostscript")
         print("• Linux: sudo apt-get install ghostscript")
         sys.exit(1)
+
+    if args.dirs:
+        out_name = args.output.name
+        for folder in args.dirs:
+            if not folder.is_dir():
+                print(f"⚠️ Not a folder: {folder}")
+                continue
+            try:
+                process_folder(folder, out_name)
+                print(f"✅ Created: {folder / out_name}")
+            except Exception as e:
+                print(f"❌ {folder}: {e}")
+        return
 
     # Validate PDFs
     valid_pdfs = []
@@ -740,7 +876,6 @@ def cli_main() -> None:
         print("❌ Need at least 2 valid PDFs!")
         sys.exit(1)
 
-    # Pair PDFs
     pairs = pair_cover_invoices(valid_pdfs)
     if not pairs:
         print("❌ No valid 'Cover Sheet' + 'Invoice' pairs found!")
@@ -749,40 +884,13 @@ def cli_main() -> None:
     print(f"📄 Found {len(pairs)} pair(s) to merge")
 
     try:
-        # Process
         for i, (cover, invoice) in enumerate(pairs):
-            temp_flat = args.output.parent / f"TEMP_FLAT_{cover.stem}_{i}.pdf"
-
-            print(f"🔧 Flattening {cover.name}...")
-            gs_flatten(cover, temp_flat)
-
-            if len(pairs) == 1:
-                out_file = args.output
-                print(f"🔗 Merging with {invoice.name}...")
-            else:
-                out_file = args.output.parent / f"MERGED_{invoice.stem}.pdf"
-                print(f"🔗 Merging {cover.name} + {invoice.name} → {out_file.name}")
-            merge_pdfs(temp_flat, invoice, out_file)
-
-            # Flatten the final output
-            print(f"🔧 Flattening final output...")
-            temp_final = out_file.parent / f"TEMP_FINAL_{out_file.stem}.pdf"
-            gs_flatten(out_file, temp_final)
-            out_file.unlink()
-            temp_final.rename(out_file)
-
+            out_file = args.output if len(pairs) == 1 else args.output.parent / f"MERGED_{invoice.stem}.pdf"
+            merge_and_flatten(cover, invoice, out_file)
             print(f"✅ Created: {out_file}")
-
-        # Cleanup
-        if temp_flat.exists():
-            temp_flat.unlink()
         print("✅ Done!")
-
     except Exception as e:
         print(f"❌ Error: {e}")
-        # Cleanup on error
-        if 'temp_flat' in locals() and temp_flat.exists():
-            temp_flat.unlink()
         sys.exit(1)
 
 # ────────────────────────────────────────────────────────────
