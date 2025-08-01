@@ -30,6 +30,33 @@ jobs:
           cp -R "$GS_PREFIX/lib" "$GS_PREFIX/share/ghostscript" \
             dist/InvoiceMerge.app/Contents/Resources/ghostscript/
 
+      - name: Import signing certificate
+        if: ${{ secrets.MACOS_CERTIFICATE }}
+        run: |
+          echo "$MACOS_CERTIFICATE" | base64 --decode > signing.p12
+          security create-keychain -p "" build.keychain
+          security import signing.p12 -k build.keychain -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security list-keychains -s build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "" build.keychain
+
+      - name: Codesign .app
+        if: ${{ secrets.MACOS_CERTIFICATE }}
+        run: |
+          codesign --deep --force --options runtime --sign "$MACOS_CODESIGN_IDENTITY" dist/InvoiceMerge.app
+
+      - name: Notarize .app
+        if: ${{ secrets.APPLE_ID }} && ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          xcrun notarytool submit dist/InvoiceMerge.app \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" --wait
+
+      - name: Staple notarization ticket
+        if: ${{ secrets.APPLE_ID }} && ${{ secrets.APPLE_APP_PASSWORD }}
+        run: xcrun stapler staple dist/InvoiceMerge.app
+
       - name: Create DMG
         run: |
           hdiutil create -volname InvoiceMerge \
