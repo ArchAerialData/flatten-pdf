@@ -45,7 +45,9 @@ PRIMARY_LOGO = LOGO_DIR / "Arch Aerial Logo White.png"
 CIRCLE_LOGO = LOGO_DIR / "AALLC_CircleLogo_2023_V3_White.png"
 
 # Keywords to identify PDFs
-COVER_KEYWORD = "cover sheet"
+# Keywords that indicate the first page ("cover") PDF
+COVER_KEYWORDS = ["cover", "name"]
+# Secondary keyword isn't really used anymore but kept for compatibility
 INVOICE_KEYWORD = "invoice"
 DEFAULT_OUTPUT = "FINAL_MERGED_INVOICE.pdf"
 
@@ -168,6 +170,27 @@ def merge_pdfs(first: Path, second: Path, out_pdf: Path) -> None:
         raise RuntimeError(f"Error writing output PDF: {str(e)}")
 
 
+def determine_cover_invoice(pdfs: List[Path]) -> tuple[Path, Path]:
+    """Return (cover, other) given exactly two PDF paths."""
+    if len(pdfs) != 2:
+        raise ValueError("Expected exactly two PDFs")
+
+    def has_cover_kw(p: Path) -> bool:
+        name = p.name.lower()
+        return any(kw in name for kw in COVER_KEYWORDS)
+
+    first, second = pdfs
+    first_has = has_cover_kw(first)
+    second_has = has_cover_kw(second)
+
+    if first_has and not second_has:
+        return first, second
+    if second_has and not first_has:
+        return second, first
+    # Ambiguous or none match; default to input order
+    return first, second
+
+
 def merge_and_flatten(cover: Path, invoice: Path, final_out: Path) -> None:
     """Flatten *cover*, merge with *invoice*, flatten result to *final_out*."""
     temp_flat = final_out.parent / f"TEMP_FLAT_{cover.stem}.pdf"
@@ -195,13 +218,14 @@ def process_folder(folder: Path, out_dir: Path) -> Path:
     if len(pdfs) < 2:
         raise RuntimeError(f"{folder}: expected at least two PDFs")
 
-    pairs = pair_cover_invoices(pdfs)
-    if pairs:
-        cover, invoice = pairs[0]
-    elif len(pdfs) == 2:
-        cover, invoice = pdfs
+    if len(pdfs) == 2:
+        cover, invoice = determine_cover_invoice(pdfs)
     else:
-        raise RuntimeError(f"{folder}: could not determine cover/invoice pair")
+        pairs = pair_cover_invoices(pdfs)
+        if pairs:
+            cover, invoice = pairs[0]
+        else:
+            raise RuntimeError(f"{folder}: could not determine cover/invoice pair")
 
     final_out = out_dir / f"{folder.name}.pdf"
     merge_and_flatten(cover, invoice, final_out)
@@ -209,10 +233,19 @@ def process_folder(folder: Path, out_dir: Path) -> Path:
 
 
 def pair_cover_invoices(pdfs: List[Path]) -> List[tuple[Path, Path]]:
-    """Return (cover, invoice) pairs from *pdfs* based on keywords."""
+    """Return (cover, invoice) pairs from *pdfs* based on keywords.
+
+    If exactly two PDFs are supplied, the one containing any of
+    :data:`COVER_KEYWORDS` is treated as the cover page and the other as the
+    second page.
+    """
+    if len(pdfs) == 2:
+        cover, invoice = determine_cover_invoice(pdfs)
+        return [(cover, invoice)]
     def sanitize(name: str) -> str:
         base = name.lower()
-        base = base.replace(COVER_KEYWORD, "")
+        for kw in COVER_KEYWORDS:
+            base = base.replace(kw, "")
         base = base.replace(INVOICE_KEYWORD, "")
         base = re.sub(r"[\s_-]+", "", base)
         return base
@@ -222,7 +255,7 @@ def pair_cover_invoices(pdfs: List[Path]) -> List[tuple[Path, Path]]:
         stem = pdf.stem.lower()
         key = sanitize(stem)
         entry = groups.setdefault(key, {})
-        if COVER_KEYWORD in stem:
+        if any(kw in stem for kw in COVER_KEYWORDS):
             entry["cover"] = pdf
         if INVOICE_KEYWORD in stem:
             entry["invoice"] = pdf
