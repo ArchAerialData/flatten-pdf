@@ -1,8 +1,9 @@
+---
 name: macOS build
 
 on:
   push:
-    branches: [main]
+    tags: ["v*.*.*"]
   workflow_dispatch:
 
 jobs:
@@ -12,12 +13,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: { python-version: "3.12" }
+        with:
+          python-version: "3.12"
 
       - run: pip install -r requirements.txt pyinstaller
 
       - name: Build .app
-        run: pyinstaller -y --windowed --name InvoiceMerge invoice_flatten_merge.py
+        run: |
+          pyinstaller -y --windowed \
+            invoice_flatten_merge.py --name InvoiceMerge
 
       - name: Install Ghostscript
         run: brew install ghostscript
@@ -26,9 +30,11 @@ jobs:
         run: |
           GS_PREFIX=$(brew --prefix ghostscript)
           mkdir -p dist/InvoiceMerge.app/Contents/Resources/ghostscript
-          cp "$GS_PREFIX/bin/gs" dist/InvoiceMerge.app/Contents/Resources/ghostscript/
+          cp "$GS_PREFIX/bin/gs" \
+            dist/InvoiceMerge.app/Contents/Resources/ghostscript/
           cp -R "$GS_PREFIX/lib" "$GS_PREFIX/share/ghostscript" \
             dist/InvoiceMerge.app/Contents/Resources/ghostscript/
+
 
       - name: Create DMG
         run: |

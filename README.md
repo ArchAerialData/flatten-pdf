@@ -1,7 +1,7 @@
 # flatten-pdf
 
 Utility for merging and flattening invoice PDFs. The repository contains a
-GitHub Actions workflow for building a signed macOS application bundle and DMG.
+GitHub Actions workflow for building a macOS application bundle and DMG.
 
 ## Building the macOS Application
 
