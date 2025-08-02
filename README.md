@@ -1,14 +1,28 @@
 # flatten-pdf
 
 Utility for merging and flattening invoice PDFs. The repository contains a
-GitHub Actions workflow for building a signed macOS application bundle and DMG.
+GitHub Actions workflow for building a signed and notarized macOS application
+bundle and DMG.
 
 ## Building the macOS Application
 
 The workflow is defined in `.github/workflows/Build-Mac-PDF.yml`. It runs when
 you push a Git tag that matches `v*.*.*`. The job installs Python dependencies,
-builds the `.app` using PyInstaller, vendors Ghostscript via Homebrew and
-produces an `InvoiceMerge.dmg`.
+builds the `.app` using PyInstaller, vendors Ghostscript via Homebrew, signs and
+notarizes the bundle (when the required secrets are available) and produces an
+`InvoiceMerge.dmg`.
+
+### Required Secrets
+
+The workflow expects the following secrets to be configured on your repository
+for codesigning and notarization:
+
+- `MACOS_CERTIFICATE` – base64-encoded signing certificate (.p12)
+- `MACOS_CERTIFICATE_PASSWORD` – password for the certificate
+- `MACOS_CODESIGN_IDENTITY` – signing identity to use with `codesign`
+- `APPLE_ID` – your Apple ID used for notarization
+- `APPLE_TEAM_ID` – Developer Team ID
+- `APPLE_APP_PASSWORD` – app-specific password for notarization
 
 ### Triggering the workflow
 
