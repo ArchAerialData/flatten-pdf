@@ -1,14 +1,16 @@
 # flatten-pdf
 
 Utility for merging and flattening invoice PDFs. The repository contains a
-GitHub Actions workflow for building a signed macOS application bundle and DMG.
+GitHub Actions workflow for building a signed and notarized macOS application
+bundle and DMG.
 
 ## Building the macOS Application
 
 The workflow is defined in `.github/workflows/Build-Mac-PDF.yml`. It runs when
 you push a Git tag that matches `v*.*.*`. The job installs Python dependencies,
-builds the `.app` using PyInstaller, vendors Ghostscript via Homebrew and
-produces an `InvoiceMerge.dmg`.
+builds the `.app` using PyInstaller, vendors Ghostscript via Homebrew, signs and
+notarizes the bundle (when the required secrets are available) and produces an
+`InvoiceMerge.dmg`.
 
 ### Triggering the workflow
 

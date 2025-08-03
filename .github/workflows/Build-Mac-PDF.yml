@@ -8,16 +8,26 @@ on:
 jobs:
   build-macos:
     runs-on: macos-14
+    env:
+      MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      MACOS_CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: { python-version: "3.12" }
+        with:
+          python-version: "3.12"
 
       - run: pip install -r requirements.txt pyinstaller
 
       - name: Build .app
-        run: pyinstaller -y --windowed --name InvoiceMerge invoice_flatten_merge.py
+        run: |
+          pyinstaller -y --windowed --name InvoiceMerge \
+            invoice_flatten_merge.py
 
       - name: Install Ghostscript
         run: brew install ghostscript
@@ -26,9 +36,39 @@ jobs:
         run: |
           GS_PREFIX=$(brew --prefix ghostscript)
           mkdir -p dist/InvoiceMerge.app/Contents/Resources/ghostscript
-          cp "$GS_PREFIX/bin/gs" dist/InvoiceMerge.app/Contents/Resources/ghostscript/
+          cp "$GS_PREFIX/bin/gs" \
+            dist/InvoiceMerge.app/Contents/Resources/ghostscript/
           cp -R "$GS_PREFIX/lib" "$GS_PREFIX/share/ghostscript" \
             dist/InvoiceMerge.app/Contents/Resources/ghostscript/
+
+      - name: Import signing certificate
+        if: env.MACOS_CERTIFICATE != ''
+        run: |
+          echo "$MACOS_CERTIFICATE" | base64 --decode > signing.p12
+          security create-keychain -p "" build.keychain
+          security import signing.p12 -k build.keychain \
+            -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security list-keychains -s build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "" build.keychain
+
+      - name: Codesign .app
+        if: env.MACOS_CERTIFICATE != ''
+        run: |
+          codesign --deep --force --options runtime \
+            --sign "$MACOS_CODESIGN_IDENTITY" dist/InvoiceMerge.app
+
+      - name: Notarize .app
+        if: env.APPLE_ID != '' && env.APPLE_APP_PASSWORD != ''
+        run: |
+          xcrun notarytool submit dist/InvoiceMerge.app \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" --wait
+
+      - name: Staple notarization ticket
+        if: env.APPLE_ID != '' && env.APPLE_APP_PASSWORD != ''
+        run: xcrun stapler staple dist/InvoiceMerge.app
 
       - name: Create DMG
         run: |
