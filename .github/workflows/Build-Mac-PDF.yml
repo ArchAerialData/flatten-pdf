@@ -40,16 +40,30 @@ jobs:
 
     - name: Bundle Ghostscript with app
       run: |
+        # Debug: Check what Ghostscript we have
+        which gs
+        gs --version
+        echo "Ghostscript prefix: $(brew --prefix ghostscript)"
+        
         # Create ghostscript directory in app bundle  
         mkdir -p "dist/Invoice Merger.app/Contents/Resources/ghostscript"
+        
         # Copy Ghostscript binary to app bundle
         cp "$(brew --prefix ghostscript)/bin/gs" "dist/Invoice Merger.app/Contents/Resources/ghostscript/"
+        
         # Make it executable
         chmod +x "dist/Invoice Merger.app/Contents/Resources/ghostscript/gs"
-        # Verify it was copied
+        
+        # Verify it was copied and is executable
         ls -la "dist/Invoice Merger.app/Contents/Resources/ghostscript/"
-        # Check app structure
-        ls -la "dist/Invoice Merger.app/Contents/"
+        file "dist/Invoice Merger.app/Contents/Resources/ghostscript/gs"
+        
+        # Test that the bundled Ghostscript works
+        "dist/Invoice Merger.app/Contents/Resources/ghostscript/gs" --version
+        
+        # Check the complete app structure
+        echo "=== Complete app structure ==="
+        find "dist/Invoice Merger.app" -type f -name "gs" -exec ls -la {} \;
 
     - name: Remove quarantine attributes (macOS fix)
       run: |
