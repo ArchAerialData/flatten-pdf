@@ -58,14 +58,34 @@ DEFAULT_OUTPUT = "FINAL_MERGED_INVOICE.pdf"
 def ghostscript_exe() -> str:
     """Return the path to the Ghostscript executable bundled with the app or
     available on the system."""
-    base = getattr(sys, "_MEIPASS", None)
-    if base:
-        if os.name == "nt":
-            vend = Path(base) / "ghostscript" / "gswin64c.exe"
-        else:
-            vend = Path(base) / "ghostscript" / "gs"
-        if vend.is_file():
-            return str(vend)
+    
+    # Check if running as a PyInstaller bundle
+    if getattr(sys, '_MEIPASS', None):
+        # PyInstaller bundle - check for bundled Ghostscript
+        bundle_path = Path(sys._MEIPASS).parent / "Resources" / "ghostscript" / "gs"
+        if bundle_path.exists():
+            return str(bundle_path)
+    
+    # Check if running as a macOS app bundle
+    if sys.platform == "darwin":
+        # Get the executable path and navigate to Resources
+        exe_path = Path(sys.executable)
+        # Check if we're in an app bundle structure
+        if "Contents/MacOS" in str(exe_path):
+            # We're in an app bundle - go up to Contents, then to Resources
+            contents_dir = exe_path.parent.parent
+            gs_path = contents_dir / "Resources" / "ghostscript" / "gs"
+            if gs_path.exists():
+                return str(gs_path)
+        
+        # Alternative check: look for app bundle relative to script location
+        script_path = Path(__file__).resolve()
+        if "Contents/Resources" in str(script_path):
+            # Script is inside app bundle Resources
+            resources_dir = script_path.parents[str(script_path).count("Resources") - 1]
+            gs_path = resources_dir / "ghostscript" / "gs"
+            if gs_path.exists():
+                return str(gs_path)
     
     # Try to find system Ghostscript
     if os.name == "nt":
@@ -89,9 +109,8 @@ def ghostscript_exe() -> str:
         # Fall back to expecting it in PATH
         return "gswin64c"
     else:
-        # Unix-like systems
+        # Unix-like systems - try system installation
         return "gs"
-
 
 def check_ghostscript() -> bool:
     """Check if Ghostscript is available."""

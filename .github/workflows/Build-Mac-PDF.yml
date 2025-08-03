@@ -1,82 +1,63 @@
-name: macOS build
+name: Build Invoice Merger
 
 on:
   push:
-    branches: [main]
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
   build-macos:
-    runs-on: macos-14
-    env:
-      MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
-      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-      MACOS_CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-
+    runs-on: macos-latest
+    
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install customtkinter tkinterdnd2 pillow pypdf2 pyinstaller
+        
+    - name: Install Ghostscript
+      run: brew install ghostscript
+        
+    - name: List files (debug)
+      run: ls -la
+        
+    - name: Build macOS app
+      run: |
+        pyinstaller --onefile --windowed --name Invoice_Merger_v1.4.2 invoice_flatten_merge.py
+        mv "dist/Invoice_Merger_v1.4.2.app" "Invoice Merger.app"
 
-      - run: pip install -r requirements.txt pyinstaller
+    - name: Bundle Ghostscript with app
+      run: |
+        # Create ghostscript directory in app bundle  
+        mkdir -p "Invoice Merger.app/Contents/Resources/ghostscript"
+        # Copy Ghostscript binary to app bundle
+        cp "$(brew --prefix ghostscript)/bin/gs" "Invoice Merger.app/Contents/Resources/ghostscript/"
+        # Make it executable
+        chmod +x "Invoice Merger.app/Contents/Resources/ghostscript/gs"
+        # Verify it was copied
+        ls -la "Invoice Merger.app/Contents/Resources/ghostscript/"
 
-      - name: Build .app
-        run: |
-          pyinstaller -y --windowed --name InvoiceMerge \
-            invoice_flatten_merge.py
-
-      - name: Install Ghostscript
-        run: brew install ghostscript
-
-      - name: Vendor Ghostscript
-        run: |
-          GS_PREFIX=$(brew --prefix ghostscript)
-          mkdir -p dist/InvoiceMerge.app/Contents/Resources/ghostscript
-          cp "$GS_PREFIX/bin/gs" \
-            dist/InvoiceMerge.app/Contents/Resources/ghostscript/
-          cp -R "$GS_PREFIX/lib" "$GS_PREFIX/share/ghostscript" \
-            dist/InvoiceMerge.app/Contents/Resources/ghostscript/
-
-      - name: Import signing certificate
-        if: env.MACOS_CERTIFICATE != ''
-        run: |
-          echo "$MACOS_CERTIFICATE" | base64 --decode > signing.p12
-          security create-keychain -p "" build.keychain
-          security import signing.p12 -k build.keychain \
-            -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-          security list-keychains -s build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p "" build.keychain
-
-      - name: Codesign .app
-        if: env.MACOS_CERTIFICATE != ''
-        run: |
-          codesign --deep --force --options runtime \
-            --sign "$MACOS_CODESIGN_IDENTITY" dist/InvoiceMerge.app
-
-      - name: Notarize .app
-        if: env.APPLE_ID != '' && env.APPLE_APP_PASSWORD != ''
-        run: |
-          xcrun notarytool submit dist/InvoiceMerge.app \
-            --apple-id "$APPLE_ID" \
-            --team-id "$APPLE_TEAM_ID" \
-            --password "$APPLE_APP_PASSWORD" --wait
-
-      - name: Staple notarization ticket
-        if: env.APPLE_ID != '' && env.APPLE_APP_PASSWORD != ''
-        run: xcrun stapler staple dist/InvoiceMerge.app
-
-      - name: Create DMG
-        run: |
-          hdiutil create -volname InvoiceMerge \
-            -srcfolder dist/InvoiceMerge.app -ov -format UDZO InvoiceMerge.dmg
-
-      - name: Upload DMG
-        uses: actions/upload-artifact@v4
-        with:
-          name: InvoiceMerge-Mac-DMG
-          path: InvoiceMerge.dmg
+    - name: Create DMG
+      run: |
+        hdiutil create -volname "Invoice Merger" -srcfolder "Invoice Merger.app" -ov -format UDZO "Invoice_Merger_v1.4.2.dmg"
+        
+    - name: Upload macOS DMG
+      uses: actions/upload-artifact@v4
+      with:
+        name: macos-dmg
+        path: Invoice_Merger_v1.4.2.dmg
+        
+    - name: Upload macOS app
+      uses: actions/upload-artifact@v4
+      with:
+        name: macos-app
+        path: Invoice Merger.app
