@@ -51,11 +51,22 @@ jobs:
         # Check app structure
         ls -la "dist/Invoice Merger.app/Contents/"
 
+    - name: Remove quarantine attributes (macOS fix)
+      run: |
+        # Remove extended attributes that cause "damaged" warnings
+        sudo xattr -cr "dist/Invoice Merger.app"
+        # Set proper permissions
+        chmod -R 755 "dist/Invoice Merger.app"
+        # Make executable
+        chmod +x "dist/Invoice Merger.app/Contents/MacOS/Invoice_Merger_v1.4.2"
+
     - name: Create DMG
       run: |
         # Create a temporary directory for DMG contents
         mkdir dmg-staging
         cp -R "dist/Invoice Merger.app" dmg-staging/
+        # Remove quarantine from DMG contents too
+        sudo xattr -cr dmg-staging/
         # Create DMG from staging directory
         hdiutil create -volname "Invoice Merger" -srcfolder dmg-staging -ov -format UDZO "Invoice_Merger_v1.4.2.dmg"
         # Clean up staging
